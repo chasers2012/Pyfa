@@ -19,7 +19,6 @@ import base64
 import datetime
 from service.const import EsiSsoMode, EsiEndpoints
 from service.settings import EsiSettings, NetworkSettings
-
 from requests import Session
 from urllib.parse import urlencode, quote
 
@@ -69,21 +68,20 @@ class EsiAccess:
         self._session = Session()
         self._session.headers.update({
             'Accept': 'application/json',
-            'User-Agent': (
-                'pyfa v{}'.format(config.version)
-            )
+            'Origin': 'https://esi.evepc.163.com',
+            'Content-Type': 'application/x-www-form-urlencoded'
         })
         self._session.proxies = NetworkSettings.getInstance().getProxySettingsInRequestsFormat()
 
     @property
     def sso_url(self):
-        if self.settings.get("ssoMode") == EsiSsoMode.CUSTOM:
-            return "https://login.eveonline.com"
-        return "https://www.pyfa.io"
+        # if self.settings.get("ssoMode") == EsiSsoMode.CUSTOM:
+        return "https://login.evepc.163.com/v2"
+        # return "https://www.pyfa.io"
 
     @property
     def esi_url(self):
-        return "https://esi.evetech.net"
+        return "https://esi.evepc.163.com"
 
     @property
     def oauth_verify(self):
@@ -121,33 +119,42 @@ class EsiAccess:
         if 'refresh_token' in tokenResponse:
             char.refreshToken = config.cipher.encrypt(tokenResponse['refresh_token'].encode())
 
+    def get_device_id(self):
+
+        baseUrl = 'https://mpay-web.g.mkey.163.com/device/init'
+        args = {
+            'game_id': 'aecfu6bgiuaaaal2-g-ma79',
+            'device_type': 'PC',
+            'system_name': 'Windows',
+            'system_version': '10',
+            'resolution': '1920*1080',
+            'device_model': '64',
+        }
+        try:
+            resp = self._after_request(self._session.get(baseUrl, data=args)).json()
+            pyfalog.info(resp)
+            print(resp)
+            return resp['device']['id']
+        except Exception as e:
+            pyfalog.error(e)
+            return ''
+
     def getLoginURI(self, redirect=None):
         self.state = str(uuid.uuid4())
-
-        if self.settings.get("ssoMode") == EsiSsoMode.AUTO:
-            args = {
-                'state': self.state,
-                'pyfa_version': config.version,
-                'login_method': self.settings.get('loginMode'),
-                'client_hash': config.getClientSecret()
-            }
-
-            if redirect is not None:
-                args['redirect'] = redirect
-
-            return '%s?%s' % (
-                self.oauth_authorize,
-                urlencode(args)
-            )
-        else:
-            return '%s?response_type=%s&redirect_uri=%s&client_id=%s%s%s' % (
-                self.oauth_authorize,
-                'code',
-                quote('http://localhost:6461', safe=''),
-                self.settings.get('clientID'),
-                '&scope=%s' % '+'.join(scopes) if scopes else '',
-                '&state=%s' % self.state
-            )
+        device_id = self.get_device_id()
+        args = {
+            'response_type': 'token',
+            'client_id': 'bc90aa496a404724a93f41b4f4e97761',
+            'redirect_uri': 'https%3A%2F%2Fesi.evepc.163.com%2Fui%2Foauth2-redirect.html',
+            'scope': '+'.join(scopes) if scopes else '',
+            'realm': 'ESI',
+            'state': self.state,
+            'device_id': device_id,
+        }
+        args_arr = []
+        for k in args.keys():
+            args_arr.append('{}={}'.format(k, args[k]))
+        return '{}?{}'.format(self.oauth_authorize, '&'.join(args_arr))
 
     def get_oauth_header(self, token):
         """ Return the Bearer Authorization header required in oauth calls
